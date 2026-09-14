@@ -1,0 +1,88 @@
+name: Aggregate IP Blocklists
+
+on:
+  schedule:
+    - cron: "15 3 * * *"
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+  id-token: write
+  pages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate and Aggregate IPs
+        run: |
+          python3 - << 'EOF'
+          import re
+          import urllib.request
+          import os
+
+          urls = [
+              "https://www.spamhaus.org/drop/drop.txt",
+              "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset",
+              "https://rules.emergingthreats.net/blockrules/compromised-ips.txt",
+              "https://cinsscore.com/list/ci-badguys.txt",
+              "https://check.torproject.org/torbulkexitlist",
+              "https://lists.blocklist.de/lists/all.txt",
+              "https://www.dshield.org/block.txt",
+              "https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
+              "https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt",
+              "https://blocklist.greensnow.co/greensnow.txt",
+              "https://www.team-cymru.org/Services/Bogons/fullbogons-ipv4.txt",
+              "https://binarydefense.com/banlist.txt",
+              "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level2.netset"
+          ]
+
+          ip_pattern = re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:/\d{1,2})?\b')
+          ips = set()
+
+          for url in urls:
+              print(f"Fetching {url}...")
+              try:
+                  req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                  with urllib.request.urlopen(req, timeout=15) as response:
+                      content = response.read().decode('utf-8', errors='ignore')
+                      found = ip_pattern.findall(content)
+                      print(f"  Found {len(found)} entries.")
+                      ips.update(found)
+              except Exception as e:
+                  print(f"  Error fetching {url}: {e}")
+
+          clean_ips = sorted(list(ips))
+          print(f"Total unique IPs/CIDRs: {len(clean_ips)}")
+
+          os.makedirs("public", exist_ok=True)
+          with open("public/ips.txt", "w") as f:
+              f.write("\n".join(clean_ips) + "\n")
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'public'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
