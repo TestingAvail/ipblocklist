@@ -37,6 +37,7 @@ jobs:
           import os
 
           urls = [
+              "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level3.netset",
               "https://raw.githubusercontent.com/C24Be/AS_Network_List/refs/heads/main/blacklists/blacklist-v4.txt",
               "https://www.spamhaus.org/drop/drop.txt",
               "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset",
