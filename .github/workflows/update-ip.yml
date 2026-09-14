@@ -69,6 +69,10 @@ jobs:
                   print(f"  Error fetching {url}: {e}")
 
           clean_ips = sorted(list(ips))
+          
+          # Вырезаем суицидальные подсети, которые ломают фаервол
+          blacklist_exclusions = {"0.0.0.0/8", "0.0.0.0/32", "127.0.0.0/8"}
+          clean_ips = [ip for ip in clean_ips if ip not in blacklist_exclusions]
           print(f"Total unique IPs/CIDRs: {len(clean_ips)}")
 
           os.makedirs("public", exist_ok=True)
