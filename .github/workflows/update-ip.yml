@@ -81,6 +81,24 @@ jobs:
               f.write("\n".join(clean_ips) + "\n")
           EOF
 
+      - name: Generate Checksums & Tag
+        id: meta
+        run: |
+          sha256sum public/ips.txt > public/ips.txt.sha256
+          TAG_NAME="blocklist-$(date -u +'%Y.%m.%d-%H%M')"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Generated tag: $TAG_NAME"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.TAG_NAME }}
+          name: "IP Blocklist Release ${{ steps.meta.outputs.TAG_NAME }}"
+          body: "Automated aggregated malicious IP blocklist with SHA256 checksum."
+          files: |
+            public/ips.txt
+            public/ips.txt.sha256
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
