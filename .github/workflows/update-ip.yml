@@ -48,8 +48,7 @@ jobs:
               "https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
               "https://blocklist.greensnow.co/greensnow.txt",
               "https://www.team-cymru.org/Services/Bogons/fullbogons-ipv4.txt",
-              "https://binarydefense.com/banlist.txt",
-              "https://urlhaus.abuse.ch/downloads/text/"
+              "https://binarydefense.com/banlist.txt"
           ]
 
           ip_pattern = re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:/\d{1,2})?\b')
