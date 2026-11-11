@@ -28,10 +28,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
+          cache: 'pip' # Теперь он найдет requirements.txt
 
       - name: Install dependencies
-        run: pip install aiohttp
+        run: pip install -r requirements.txt # <--- Изменили эту строчку
 
       - name: Generate and Aggregate IPs
         run: python3 update_ip.py
