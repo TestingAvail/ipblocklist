@@ -1,8 +1,10 @@
-import re
-import urllib.request
+import asyncio
+import aiohttp
+import ssl
+import ipaddress
 import os
 
-urls = [
+URLS = [
     "https://raw.githubusercontent.com/C24Be/AS_Network_List/refs/heads/main/blacklists/blacklist-v4.txt",
     "https://www.spamhaus.org/drop/drop.txt",
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset",
@@ -17,28 +19,103 @@ urls = [
     "https://binarydefense.com/banlist.txt"
 ]
 
-ip_pattern = re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:/\d{1,2})?\b')
-ips = set()
+# Запрещенные для блокировки сети (локальные, приватные, служебные)
+EXCLUSIONS = [
+    ipaddress.ip_network('0.0.0.0/8'),
+    ipaddress.ip_network('10.0.0.0/8'),
+    ipaddress.ip_network('100.64.0.0/10'),
+    ipaddress.ip_network('127.0.0.0/8'),
+    ipaddress.ip_network('169.254.0.0/16'),
+    ipaddress.ip_network('172.16.0.0/12'),
+    ipaddress.ip_network('192.168.0.0/16'),
+    ipaddress.ip_network('224.0.0.0/4'),
+    ipaddress.ip_network('240.0.0.0/4'),
+]
 
-for url in urls:
-    print(f"Fetching {url}...")
+def is_valid_ip_or_cidr(text):
+    """Проверяет, является ли строка валидным IPv4 или CIDR, и не входит ли в исключения."""
+    text = text.strip()
+    if not text:
+        return False
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=15) as response:
-            content = response.read().decode('utf-8', errors='ignore')
-            found = ip_pattern.findall(content)
-            print(f"  Found {len(found)} entries.")
-            ips.update(found)
-    except Exception as e:
-        print(f"  Error fetching {url}: {e}")
+        # Пытаемся распарсить как сеть (поддерживает и одиночные IP)
+        net = ipaddress.ip_network(text, strict=False)
+        if net.version != 4:
+            return False
+        
+        # Проверяем на пересечение с исключениями
+        for excl in EXCLUSIONS:
+            if net.overlaps(excl):
+                return False
+        return True
+    except ValueError:
+        return False
 
-clean_ips = sorted(ips)
+async def fetch_url_async(session, url, semaphore):
+    ips = set()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:159.0) Gecko/20100101 Firefox/159.0"
+    }
+    
+    async with semaphore:
+        for attempt in range(3):
+            try:
+                print(f"Fetching {url} (attempt {attempt + 1})...")
+                async with session.get(url, headers=headers, timeout=45, ssl=False) as response:
+                    if response.status == 200:
+                        text = await response.text(errors='ignore')
+                        # Ищем все строки, похожие на IP
+                        for line in text.splitlines():
+                            # Извлекаем потенциальный IP или CIDR из строки (игнорируя комментарии)
+                            line = line.split('#')[0].strip()
+                            if not line: continue
+                            
+                            # Разбиваем по пробелам, чтобы найти токен с IP
+                            parts = line.split()
+                            for part in parts:
+                                if is_valid_ip_or_cidr(part):
+                                    ips.add(part)
+                        
+                        print(f"  Found {len(ips)} valid entries.")
+                        return ips
+            except Exception as e:
+                print(f"  Error fetching {url}: {type(e).__name__}")
+            
+            if attempt < 2:
+                await asyncio.sleep(2)
+                
+    return ips
 
-# Вырезаем служебные подсети, которые ломают фаервол
-blacklist_exclusions = {"0.0.0.0/8", "0.0.0.0/32", "127.0.0.0/8"}
-clean_ips = [ip for ip in clean_ips if ip not in blacklist_exclusions]
-print(f"Total unique IPs/CIDRs: {len(clean_ips)}")
+async def fetch_all_async():
+    all_ips = set()
+    semaphore = asyncio.Semaphore(10) # Не перегружаем сервера
+    
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
 
-os.makedirs("public", exist_ok=True)
-with open("public/ips.txt", "w") as f:
-    f.write("\n".join(clean_ips) + "\n")
+    connector = aiohttp.TCPConnector(ssl=ssl_context, limit=10)
+    
+    async with aiohttp.ClientSession(connector=connector) as session:
+        tasks = [fetch_url_async(session, url, semaphore) for url in URLS]
+        results = await asyncio.gather(*tasks)
+        
+    for ips in results:
+        all_ips.update(ips)
+        
+    return all_ips
+
+def save_ips(ips_set):
+    # Сортируем по числовому значению, а не по строке
+    clean_ips = sorted(list(ips_set), key=lambda ip: ipaddress.ip_network(ip, strict=False).network_address)
+    print(f"Total unique IPs/CIDRs after exclusions: {len(clean_ips)}")
+
+    os.makedirs("public", exist_ok=True)
+    with open("public/ips.txt", "w") as f:
+        f.write("\n".join(clean_ips) + "\n")
+    print("Saved to public/ips.txt")
+
+if __name__ == "__main__":
+    print("--- Начинаем сборку IP-блоклиста ---")
+    collected_ips = asyncio.run(fetch_all_async())
+    save_ips(collected_ips)
